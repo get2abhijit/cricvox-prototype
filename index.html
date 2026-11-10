@@ -67,6 +67,8 @@ textarea{min-height:120px;font:12px/1.4 ui-monospace,Menlo,Consolas,monospace}
 .bwh{display:flex;align-items:center;gap:8px;margin-bottom:8px}
 .bwh span{width:20px;text-align:center;color:var(--muted);font-weight:700}
 .bwh input{flex:1}
+.kup{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);min-height:46px;padding:0 4px;white-space:nowrap}
+.kup input{width:22px;height:22px;accent-color:var(--accent);margin:0}
 .bwh .x{width:46px;height:46px;border-radius:12px;border:1px solid var(--line);background:transparent;color:var(--muted)}
 
 /* capture */
@@ -171,7 +173,8 @@ svg text{font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
 /* =====================================================================
    1. VOCABULARY  (canonical values from glossary.md + v0 spec)
    ===================================================================== */
-var SCHEMA_VERSION = '0.2';
+var APP_VERSION = 'v0.4';
+var SCHEMA_VERSION = '0.3';
 var V = {
   length: ['full_toss','yorker','full','good','back_of_a_length','short'],
   line: ['wide_outside_off','outside_off','off_stump','middle','leg_stump','outside_leg','wide_outside_leg'],
@@ -200,12 +203,12 @@ var CTX_KEYS = ['hand','side','bowler_type','keeper_position'];
                   runs, boundary, extras, wicket }   // only keys it found
        context: { hand, side, bowler_type, keeper_position,
                   batter_name, bowler_name }         // only keys it found
-       unmatched: [words], parser: 'rules-0.2' }
+       unmatched: [words], parser: 'rules-0.3' }
    No DOM, no storage, no network. Swap this block for another parser
    (for example a language model) as long as it returns the same shape.
    ===================================================================== */
 var CricVoxParser = (function () {
-  var VERSION = 'rules-0.2';
+  var VERSION = 'rules-0.3';
   var LEX = [];
   function add(set) { for (var i = 1; i < arguments.length; i++) LEX.push([arguments[i], set]); }
 
@@ -338,7 +341,7 @@ var CricVoxParser = (function () {
   // Speech-to-text mishearings -> cricket terms. raw_text keeps what was heard; only parsing uses these.
   // The built-in list is a first guess: [VERIFY] with real recordings in M02.
   var ALIAS = [
-    ['woodland','good length'], ['wood land','good length'], ['good land','good length'], ['good lens','good length'],
+    ['woodland','good length'], ['woodlands','good length'], ['wood land','good length'], ['would land','good length'], ['good lands','good length'], ['good land','good length'], ['good lens','good length'],
     ['good lent','good length'], ['goodlength','good length'], ['could length','good length'], ['wood length','good length'],
     ['yorka','yorker'], ['yoker','yorker'], ['yolker','yorker'], ['york a','yorker'],
     ['full toes','full toss'], ['full tose','full toss'], ['fulltoss','full toss'],
@@ -346,6 +349,8 @@ var CricVoxParser = (function () {
     ['mid wicked','mid wicket'], ['midwicked','mid wicket'], ['mid ticket','mid wicket'],
     ['mid of','mid off'], ['long of','long off'], ['fine lake','fine leg'], ['square lake','square leg'],
     ['gali','gully'], ['gulley','gully'], ['golly','gully'], ['pooled','pulled'], ['pool shot','pull'],
+    ['board','bowled'], ['boards','bowled'], ['bord','bowled'], ['bored','bowled'], ['bold','bowled'], ['bowld','bowled'], ['clean board','clean bowled'],
+    ['outside of','outside off'], ['on of','on off'],
     ['for for','for four'], ['l b w','lbw'], ['elbw','lbw']
   ];
   var userAlias = [];
@@ -494,7 +499,9 @@ function uid() {
 function nz(v) { return v === undefined ? null : v; }
 // Order pointer is ctx.bi. ctx.over is a one-ball override; the order then resumes at ctx.bi.
 function curBowler(ctx) { return (ctx.over != null && ctx.bowlers[ctx.over]) ? ctx.over : ctx.bi; }
-function newBowler(name) { return {name: name || '', type: null, side: 'over_the_wicket'}; }
+var SPIN = ['off_spin','leg_spin','left_arm_orthodox','left_arm_wrist_spin'];
+function keeperDefault(type) { return SPIN.indexOf(type) !== -1; }        // spinners: keeper up; pace and unknown: back
+function newBowler(name, type) { return {name: name || '', type: type || null, side: 'over_the_wicket', keeper_up: keeperDefault(type)}; }
 function buildBall(fields, ctx, raw, seq, session) {
   var bw = ctx.bowlers[curBowler(ctx)] || newBowler();
   var ball = {
@@ -503,7 +510,7 @@ function buildBall(fields, ctx, raw, seq, session) {
     seq: seq,
     batter: {name: ctx.batter.name || null, hand: ctx.batter.hand},
     bowler: {name: bw.name || null, type: nz(bw.type), side: nz(bw.side)},
-    keeper_position: nz(ctx.keeper_position),
+    keeper_position: bw.keeper_up ? 'up' : 'back',
     pitch: {length: nz(fields.length), line: nz(fields.line), zone: null},
     shot: nz(fields.shot),
     wagon: {sector: nz(fields.sector), depth: nz(fields.depth), region: nz(fields.region)},
@@ -540,12 +547,12 @@ function applyContextTo(ctx, c) {
     else if (!(ctx.bowlers[curBowler(ctx)].name || '').trim()) ctx.bowlers[curBowler(ctx)].name = c.bowler_name;
     else { ctx.bowlers.push(newBowler(c.bowler_name)); ctx.over = ctx.bowlers.length - 1; }
   }
-  if (c.bowler_type) ctx.bowlers[curBowler(ctx)].type = c.bowler_type;
+  if (c.bowler_type) { ctx.bowlers[curBowler(ctx)].type = c.bowler_type; ctx.bowlers[curBowler(ctx)].keeper_up = keeperDefault(c.bowler_type); }
   if (c.side) ctx.bowlers[curBowler(ctx)].side = c.side;
-  if (c.keeper_position) ctx.keeper_position = c.keeper_position;
+  if (c.keeper_position) ctx.bowlers[curBowler(ctx)].keeper_up = c.keeper_position === 'up';
 }
 function defaultCtx() {
-  return {batter:{name:'',hand:'right'}, bowlers:[newBowler()], bi:0, over:null, log:[], keeper_position:'back'};
+  return {batter:{name:'',hand:'right'}, bowlers:[newBowler()], bi:0, over:null, log:[]};
 }
 
 /* =====================================================================
@@ -639,6 +646,8 @@ if (typeof document !== 'undefined') (function () {
       if (d && d.session && Array.isArray(d.balls)) {
         var c = d.session.ctx;                                   // older saves had one bowler
         if (c && !c.bowlers) { c.bowlers = [c.bowler || newBowler()]; c.bi = 0; delete c.bowler; }
+        if (c) c.bowlers.forEach(function (b) { if (b.keeper_up === undefined) b.keeper_up = c.keeper_position ? c.keeper_position === 'up' : keeperDefault(b.type); });
+        if (c) delete c.keeper_position;
         return d;
       }
     } catch (e) {}
@@ -663,7 +672,7 @@ if (typeof document !== 'undefined') (function () {
   function ctxLine(ctx) {
     var ci = curBowler(ctx), cur = ctx.bowlers[ci] || newBowler();
     var bw = [cur.type ? lab(cur.type) : null, cur.side ? lab(cur.side) : null,
-      ctx.keeper_position ? lab(ctx.keeper_position) : null].filter(Boolean).join(', ');
+      cur.keeper_up ? 'Keeper up' : 'Keeper back'].filter(Boolean).join(', ');
     return {a: (ctx.batter.name || 'Batter') + ' (' + (ctx.batter.hand === 'left' ? 'LH' : 'RH') + ')',
             b: 'Next ball: ' + bName(cur, ci) + (bw ? ' — ' + bw : '')};
   }
@@ -765,11 +774,11 @@ if (typeof document !== 'undefined') (function () {
   function ctxForm(c) {
     var h = '<label class="f" for="bn">Batter</label><input id="bn" type="text" data-bind="batter.name" value="' + esc(c.batter.name) + '" placeholder="Name" autocomplete="off">' +
       '<label class="f">Batting hand</label>' + seg('batter.hand', V.hand, c.batter.hand) +
-      '<label class="f">Keeper</label>' + seg('keeper_position', V.keeper_position, c.keeper_position) +
       '<label class="f">Bowlers, in bowling order</label>';
     c.bowlers.forEach(function (b, i) {
       h += '<div class="bw"><div class="bwh"><span>' + (i + 1) + '</span><input type="text" data-bind="bowlers.' + i + '.name" value="' + esc(b.name) +
         '" placeholder="Bowler name" autocomplete="off" aria-label="Bowler ' + (i + 1) + ' name">' +
+        '<label class="kup"><input type="checkbox" data-kup="' + i + '"' + (b.keeper_up ? ' checked' : '') + '>Keeper up</label>' +
         (c.bowlers.length > 1 ? '<button type="button" class="x" data-act="delbowler" data-i="' + i + '" aria-label="Remove bowler ' + (i + 1) + '">✕</button>' : '') + '</div>' +
         '<div class="row"><select data-bind="bowlers.' + i + '.type" aria-label="Bowler ' + (i + 1) + ' type"><option value="">Type</option>' + options(V.bowler_type, b.type) + '</select>' +
         '<select data-bind="bowlers.' + i + '.side" aria-label="Bowler ' + (i + 1) + ' side">' + options(V.side, b.side) + '</select></div></div>';
@@ -804,7 +813,8 @@ if (typeof document !== 'undefined') (function () {
       '<button class="primary" data-act="start">Start session</button>' +
       '<button class="ghost" style="width:100%;margin-top:10px" data-act="testopen">Start a test session with random balls</button>' +
       '<p class="note">No audio is stored. Only the recognised text is kept, on this phone.</p></div>';
-    h += '<div style="text-align:center;margin-top:8px"><button class="linkbtn" data-act="tests">Run the 15 parser tests</button></div></div>';
+    h += '<div style="text-align:center;margin-top:8px"><button class="linkbtn" data-act="tests">Run the 15 parser tests</button>' +
+      '<p class="note">CricVox ' + APP_VERSION + ', parser ' + CricVoxParser.version + ', schema ' + SCHEMA_VERSION + '</p></div></div>';
     return h;
   }
   function chip(ball, key, miss) {
@@ -845,7 +855,8 @@ if (typeof document !== 'undefined') (function () {
       var miss = CricVoxRules.missing(b), iss = S.issues[b.ball_id] || [];
       h += '<div class="confirm"><div class="head"><b>Ball ' + b.seq + '</b><span>' + esc(b.batter.name || 'Batter') + (miss.length ? ', ' + miss.length + ' to fill' : ', complete') + '</span></div>' +
         '<div class="raw">“' + esc(b.raw_text) + '” <button class="linkbtn" style="min-height:0;padding:2px 0;font-style:normal;font-size:13px" data-act="fixes">Fix a misheard word</button></div><div class="chips">' +
-        '<button class="chip" data-act="ballbowler"><small>Bowler</small>' + esc(b.bowler.name || 'Bowler') + '</button>' + CHIP_ORDER.map(function (k) { return chip(b, k, miss); }).join('') + '</div>' +
+        '<button class="chip" data-act="ballbowler"><small>Bowler</small>' + esc(b.bowler.name || 'Bowler') + '</button>' +
+        '<button class="chip" data-act="ballkeeper"><small>Keeper</small>' + (b.keeper_position === 'up' ? 'Up' : 'Back') + '</button>' + CHIP_ORDER.map(function (k) { return chip(b, k, miss); }).join('') + '</div>' +
         (iss.length ? '<div class="issues">' + iss.map(esc).join('<br>') + '</div>' : '') + '</div>';
     } else {
       h += '<div class="confirm"><div class="empty">No balls yet. Tap the mic and say a delivery, for example: “Short ball outside off, cut to backward point for four.”</div></div>';
@@ -901,12 +912,22 @@ if (typeof document !== 'undefined') (function () {
       (mixed ? ' Left- and right-handers are combined batter-relative, drawn as a right-hander.' : (hand === 'left' ? ' Mirrored for a left-hander.' : '')) + '</p></div>';
     h += '<div class="card"><h2>Pitch map</h2>' + pitchSVG(balls, hand) +
       '<p class="note">Batter’s stumps at the top, bowler at the bottom. Band sizes are illustrative. ' + st.noZone + ' of ' + st.balls + ' balls have no length or line and are not plotted.</p></div>';
+    var outs = balls.filter(function (b) { return b.outcome.wicket; });
+    if (outs.length) h += '<div class="card"><h2>Dismissals</h2>' + outs.map(function (b) {
+      var how = [b.pitch.length ? lab(b.pitch.length) : null, b.pitch.line ? lab(b.pitch.line).toLowerCase() : null].filter(Boolean).join(', ') || 'ball not described';
+      return '<div class="test"><b>Ball ' + b.seq + ': ' + lab(b.outcome.wicket) + '</b> — ' + esc(how) + ', ' + (b.shot ? lab(b.shot).toLowerCase() : '<span style="color:var(--amber)">shot not recorded</span>') +
+        '<code>' + esc((b.bowler.name || 'Bowler') + (b.bowler.type ? ', ' + lab(b.bowler.type) : '') + (S.filter === '*' && b.batter.name ? ' to ' + b.batter.name : '')) + '</code></div>'; }).join('') + '</div>';
     var shots = Object.keys(st.shots).sort(function (a, b) { return st.shots[b] - st.shots[a]; }), mx = shots.length ? st.shots[shots[0]] : 1;
     if (shots.length) h += '<div class="card"><h2>Shots</h2><div class="bars">' + shots.map(function (k) {
       return '<div><span>' + lab(k) + '</span><span><i style="width:' + Math.max(6, Math.round(100 * st.shots[k] / mx)) + '%"></i></span><em>' + st.shots[k] + '</em></div>'; }).join('') + '</div></div>';
-    h += '<div class="card"><h2>Export</h2><div class="row"><button class="ghost" data-act="savefile">Save JSON</button><button class="ghost" data-act="savecsv">Save CSV</button><button class="ghost" data-act="copy">Copy JSON</button></div>' +
-      '<p class="note">JSON: every ball plus summary metrics for the session, each batter and each bowler (counts by length, line, zone, shot, sector, trajectory, wickets, fill rates). CSV: one row per ball for a spreadsheet.</p>' +
-      '<label class="f" for="json">Session JSON</label><textarea id="json" readonly>' + esc(exportJSON()) + '</textarea></div>';
+    var ex = exportChoices(), cur = S.exp || 'full';
+    if (!ex.some(function (x) { return x[0] === cur; })) cur = S.exp = 'full';
+    var exd = exportData(cur);
+    h += '<div class="card"><h2>Export</h2><label class="f" for="exk">What to export</label><select id="exk" data-exp="1">' +
+      ex.map(function (x) { return '<option value="' + esc(x[0]) + '"' + (x[0] === cur ? ' selected' : '') + '>' + esc(x[1]) + '</option>'; }).join('') + '</select>' +
+      '<div class="row" style="margin-top:10px"><button class="ghost" data-act="savefile">Save file</button><button class="ghost" data-act="copy">Copy</button></div>' +
+      '<p class="note">' + esc(exd.note) + '</p>' +
+      '<label class="f" for="json">Preview</label><textarea id="json" readonly>' + esc(exd.text) + '</textarea></div>';
     h += '<div class="row" style="margin-top:14px"><button class="ghost" data-act="discard">' + (S.discardArmed ? 'Tap again to end and clear' : 'End session') + '</button></div>';
     h += '<p class="foot"><b>Human-coded data.</b> ' + (S.session.test ? 'This session is generated test data.' : 'Spoken by an observer, recorded in zones. Not measured.') + '</p></div>';
     return h;
@@ -952,7 +973,7 @@ if (typeof document !== 'undefined') (function () {
   }
   function drawCtxSheet() {
     $sheet.innerHTML = '<div class="panel"><h2>Batter and bowlers</h2>' + ctxForm(S.sheet.ctx) +
-      '<p class="note">Applies to the next balls. By voice: “new batter Rahul, left hander”, “bowler Tom” (picks Tom, or adds him), “keeper up”. Bowlers rotate in this order after every ball.</p>' +
+      '<p class="note">Applies to the next balls. By voice: “new batter Rahul, left hander”, “bowler Tom” (picks Tom, or adds him), “keeper up” (sets it for this bowler). Bowlers rotate in this order after every ball.</p>' +
       '<button class="primary" data-act="ctxsave">Save</button></div>';
     $sheet.className = 'open';
   }
@@ -977,8 +998,10 @@ if (typeof document !== 'undefined') (function () {
       if (r.context.keeper_position) b.keeper_position = r.context.keeper_position;
       b.raw_text += ' | ' + raw; recheck(b); save(); render(); toast('Ball ' + b.seq + ' corrected'); return;
     }
+    var kp = r.context.keeper_position; delete r.context.keeper_position;   // "keeper up" inside a ball: this ball only
     applyContextTo(ctx, r.context);
     b = buildBall(r.fields, ctx, raw, S.balls.length + 1, S.session);
+    if (kp) b.keeper_position = kp;
     S.balls.push(b); S.sel = b.ball_id; recheck(b);
     if (!ctx.log) ctx.log = [];
     if (ctx.over != null) { ctx.over = null; ctx.log.push('o'); }      // out-of-turn ball: order resumes where it was
@@ -1096,7 +1119,13 @@ if (typeof document !== 'undefined') (function () {
       by_zone: tally(balls, function (b) { return b.pitch.zone; }), by_shot: tally(balls, function (b) { return b.shot; }),
       by_sector: sec, by_region: tally(balls, function (b) { return b.wagon.region; }),
       by_trajectory: tally(balls, function (b) { return b.trajectory; }), by_wicket: tally(balls, function (b) { return b.outcome.wicket; }),
-      by_extras: tally(balls, function (b) { return b.outcome.extras; }), by_bowler_type: tally(balls, function (b) { return b.bowler.type; })
+      by_extras: tally(balls, function (b) { return b.outcome.extras; }), by_bowler_type: tally(balls, function (b) { return b.bowler.type; }),
+      by_keeper_position: tally(balls, function (b) { return b.keeper_position; }),
+      dismissals: balls.filter(function (b) { return b.outcome.wicket; }).map(function (b) {
+        return {seq: b.seq, wicket: b.outcome.wicket, batter: b.batter.name, bowler: b.bowler.name, bowler_type: b.bowler.type,
+          length: b.pitch.length, line: b.pitch.line, zone: b.pitch.zone, shot: b.shot, sector: b.wagon.sector, region: b.wagon.region,
+          keeper_position: b.keeper_position, raw_text: b.raw_text};
+      })
     };
   }
   function summaryMetrics() {
@@ -1107,6 +1136,45 @@ if (typeof document !== 'undefined') (function () {
       return o;
     }
     return {session: metrics(S.balls), by_batter: by(function (b) { return b.batter.name; }), by_bowler: by(function (b) { return b.bowler.name; })};
+  }
+  function exportChoices() {
+    var bat = [], bowl = [];
+    S.balls.forEach(function (b) {
+      var x = b.batter.name || 'unnamed', y = b.bowler.name || 'unnamed';
+      if (bat.indexOf(x) === -1) bat.push(x); if (bowl.indexOf(y) === -1) bowl.push(y);
+    });
+    return [['full', 'Complete session (JSON)'], ['summary', 'Summary metrics only (JSON)']]
+      .concat(bat.map(function (n) { return ['batter:' + n, 'Batter: ' + n + ' (JSON)']; }))
+      .concat(bowl.map(function (n) { return ['bowler:' + n, 'Bowler: ' + n + ' (JSON)']; }))
+      .concat([['balls', 'Balls only (JSON)'], ['csv', 'Balls as a table (CSV)']]);
+  }
+  function header(kind) {
+    return {app: 'CricVox', app_version: APP_VERSION, schema_version: SCHEMA_VERSION, export: kind, exported_at: new Date().toISOString(),
+      note: S.session.test ? 'TEST DATA: randomly generated balls, not observations' : 'Human-coded data',
+      runs_note: 'Runs are observer estimates',
+      session: {id: S.session.id, type: 'training', test: !!S.session.test, net: S.session.net || null, name: S.session.name || null,
+        started_at: S.session.started_at, bowlers: S.session.ctx.bowlers}};
+  }
+  function groupBy(balls, fn) {
+    var g = {}, o = {};
+    balls.forEach(function (b) { var k = fn(b) || 'unnamed'; (g[k] = g[k] || []).push(b); });
+    Object.keys(g).forEach(function (k) { o[k] = metrics(g[k]); });
+    return o;
+  }
+  function exportData(kind) {
+    var o, slug = kind, note;
+    if (kind === 'csv') return {text: exportCSV(), ext: 'csv', slug: 'balls', note: 'One row per ball, for a spreadsheet.'};
+    if (kind === 'summary') { o = header('summary'); o.summary = summaryMetrics(); note = 'Metrics for the session, each batter and each bowler. No ball records.'; }
+    else if (kind === 'balls') { o = header('balls'); o.balls = S.balls; note = 'Every ball record, no metrics.'; }
+    else if (/^(batter|bowler):/.test(kind)) {
+      var role = kind.split(':')[0], name = kind.slice(role.length + 1), other = role === 'batter' ? 'bowler' : 'batter';
+      var balls = S.balls.filter(function (b) { return (b[role].name || 'unnamed') === name; });
+      o = header(role); o[role] = name; o.summary = metrics(balls);
+      o.summary['by_' + other] = groupBy(balls, function (b) { return b[other].name; });
+      o.balls = balls; slug = role + '-' + name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+      note = balls.length + ' balls ' + (role === 'batter' ? 'faced by ' : 'bowled by ') + name + ', with metrics split by ' + other + '.';
+    } else { o = header('full'); o.summary = summaryMetrics(); o.balls = S.balls; slug = 'full'; note = 'Every ball plus metrics for the session, each batter and each bowler (lengths, lines, zones, shots, sectors, dismissals, fill rates).'; }
+    return {text: JSON.stringify(o, null, 2), ext: 'json', slug: slug, note: note};
   }
   function exportJSON() {
     return JSON.stringify({app: 'CricVox', schema_version: SCHEMA_VERSION, exported_at: new Date().toISOString(),
@@ -1157,7 +1225,8 @@ if (typeof document !== 'undefined') (function () {
     var g = gaps === 'some' ? 0.15 : 0, len = pick(GEN.length), parts = [], roll = Math.random();
     if (Math.random() >= g) parts.push(len);
     if (Math.random() >= g) parts.push(pick(GEN.line));
-    if (roll < 0.03) { parts.push(one(['bowled', 'lbw'])); return parts.join(', '); }
+    if (roll < 0.025) { parts.push(one(['defended', 'driven', 'flicked', 'left alone', 'swept', 'pulled']) + ', bowled'); return parts.join(', '); }
+    if (roll < 0.04) { parts.push(one(['flicked', 'swept', 'defended', 'left alone']) + ', lbw'); return parts.join(', '); }
     if (roll < 0.05) { parts.push('edged, caught behind'); return parts.join(', '); }
     var key = one(GEN.shots[len]), txt = GEN.say[key];
     if (key === 'leave' || key === 'defence') { parts.push(txt); if (key === 'defence' && Math.random() < 0.5) parts.push('no run'); return parts.join(', '); }
@@ -1204,43 +1273,43 @@ if (typeof document !== 'undefined') (function () {
       '<button class="primary" data-act="testgo">Generate</button></div>';
     $sheet.className = 'open';
   }
-  function fileName(ext) {
+  function fileName(ext, slug) {
     var d = new Date(), p = function (n) { return (n < 10 ? '0' : '') + n; };
-    return 'cricvox-session-' + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' + p(d.getHours()) + p(d.getMinutes()) + '.' + ext;
+    return 'cricvox-' + (slug || 'session') + '-' + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' + p(d.getHours()) + p(d.getMinutes()) + '.' + ext;
   }
   function saveFile(kind) {
-    var csv = kind === 'csv', data = csv ? exportCSV() : exportJSON(), name = fileName(csv ? 'csv' : 'json');
+    var ex = exportData(kind || S.exp || 'full'), csv = ex.ext === 'csv', data = ex.text, name = fileName(ex.ext, ex.slug);
     function plain() {
       try {
         var url = URL.createObjectURL(new Blob([data], {type: csv ? 'text/csv' : 'application/json'})), a = document.createElement('a');
         a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
         setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
-        toast('If no file appears, use Copy JSON.');
-      } catch (e) { toast('Could not save a file here. Use Copy JSON.'); }
+        toast('If no file appears, use Copy.');
+      } catch (e) { toast('Could not save a file here. Use Copy.'); }
     }
     if (!downloadsP) { plain(); return; }
     var timeout = new Promise(function (res) { setTimeout(function () { res(null); }, 2500); });
     Promise.race([downloadsP, timeout]).then(function (dl) {
       if (!dl) { plain(); return; }
       dl.save({filename: name, data: data}).then(function () { toast('File saved'); }, function (e) {
-        toast(e && e.code === 'declined' ? 'Save cancelled' : 'Could not save a file here. Use Copy JSON.');
+        toast(e && e.code === 'declined' ? 'Save cancelled' : 'Could not save a file here. Use Copy.');
       });
     }, plain);
   }
   function copyJSON() {
-    var data = exportJSON(), ta = document.getElementById('json');
+    var data = exportData(S.exp || 'full').text, ta = document.getElementById('json');
     function old() {
       try { ta.focus(); ta.select(); ta.setSelectionRange(0, data.length); toast(document.execCommand('copy') ? 'JSON copied' : 'Select the text below and copy it.'); }
       catch (e) { toast('Select the text below and copy it.'); }
     }
-    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(data).then(function () { toast('JSON copied'); }, old); else old();
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(data).then(function () { toast('Copied'); }, old); else old();
   }
 
   function newSession(test) {
     var d = S.draft;
     S.session = {id: uid(), type: 'training', test: !!test, net: d.net, name: d.name.trim() || (test ? 'Test session' : ''), started_at: new Date().toISOString(),
       lang: d.lang, ctx: JSON.parse(JSON.stringify(d.ctx))};
-    S.balls = []; S.sel = null; S.issues = {}; S.filter = '*';
+    S.balls = []; S.sel = null; S.issues = {}; S.filter = '*'; S.exp = 'full';
   }
   function formCtx() { return S.sheet && S.sheet.type === 'ctx' ? S.sheet.ctx : S.draft.ctx; }
   var ACT = {
@@ -1257,9 +1326,11 @@ if (typeof document !== 'undefined') (function () {
     },
     nextbowler: function (el) { var c = S.session.ctx, i = Number(el.dataset.i); c.over = i === c.bi ? null : i; save(); render(); },
     ballbowler: openBowlerSheet,
+    ballkeeper: function () { var b = selBall(); if (!b) return; b.keeper_position = b.keeper_position === 'up' ? 'back' : 'up'; recheck(b); save(); render(); },
     setbowler: function (el) {
       var b = selBall(), x = S.session.ctx.bowlers[Number(el.dataset.i)];
       b.bowler = {name: x.name || null, type: x.type || null, side: x.side || null};
+      b.keeper_position = x.keeper_up ? 'up' : 'back'; recheck(b);
       closeSheet(); save(); render();
     },
     start: function () { newSession(false); S.screen = 'capture'; S.draft = null; save(); render(); window.scrollTo(0, 0); },
@@ -1302,8 +1373,7 @@ if (typeof document !== 'undefined') (function () {
     undo: undo,
     mic: toggleMic,
     typed: function () { var i = document.getElementById('typed'), v = i.value; i.value = ''; handleText(v); },
-    savefile: function () { saveFile('json'); },
-    savecsv: function () { saveFile('csv'); },
+    savefile: function () { saveFile(); },
     copy: copyJSON,
     discard: function () {
       if (!S.discardArmed) { S.discardArmed = true; render(); return; }
@@ -1318,7 +1388,16 @@ if (typeof document !== 'undefined') (function () {
   document.addEventListener('input', function (e) {
     var b = e.target.dataset ? e.target.dataset.bind : null; if (!b) return;
     if (e.target.dataset.root === 'draft') S.draft[b] = e.target.value;
-    else setPath(formCtx(), b, /\.type$/.test(b) && e.target.value === '' ? null : e.target.value);
+    else {
+      var isType = /^bowlers\.\d+\.type$/.test(b), v = isType && e.target.value === '' ? null : e.target.value;
+      setPath(formCtx(), b, v);
+      if (isType) { formCtx().bowlers[Number(b.split('.')[1])].keeper_up = keeperDefault(v); if (S.sheet) drawCtxSheet(); else render(); }
+    }
+  });
+  document.addEventListener('change', function (e) {
+    if (e.target.dataset && e.target.dataset.exp) { S.exp = e.target.value; render(); return; }
+    var k = e.target.dataset ? e.target.dataset.kup : undefined; if (k === undefined) return;
+    formCtx().bowlers[Number(k)].keeper_up = e.target.checked;
   });
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Enter' && e.target.id === 'typed') { e.preventDefault(); ACT.typed(); }
