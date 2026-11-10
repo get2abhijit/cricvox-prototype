@@ -185,7 +185,7 @@ var V = {
   wicket: ['bowled','caught','caught_behind','lbw','run_out','stumped','hit_wicket','obstructing_the_field','timed_out','retired'],
   hand: ['right','left'],
   side: ['over_the_wicket','round_the_wicket'],
-  bowler_type: ['fast','medium','off_spin','leg_spin','left_arm_orthodox','left_arm_wrist_spin'],
+  bowler_type: ['fast','medium','left_arm_fast','left_arm_medium','off_spin','leg_spin','left_arm_orthodox','left_arm_wrist_spin'],
   keeper_position: ['up','back'],
   net: ['open','closed','off_open','leg_open','back_blocked']
 };
@@ -200,12 +200,12 @@ var CTX_KEYS = ['hand','side','bowler_type','keeper_position'];
                   runs, boundary, extras, wicket }   // only keys it found
        context: { hand, side, bowler_type, keeper_position,
                   batter_name, bowler_name }         // only keys it found
-       unmatched: [words], parser: 'rules-0.1' }
+       unmatched: [words], parser: 'rules-0.2' }
    No DOM, no storage, no network. Swap this block for another parser
    (for example a language model) as long as it returns the same shape.
    ===================================================================== */
 var CricVoxParser = (function () {
-  var VERSION = 'rules-0.1';
+  var VERSION = 'rules-0.2';
   var LEX = [];
   function add(set) { for (var i = 1; i < arguments.length; i++) LEX.push([arguments[i], set]); }
 
@@ -312,6 +312,8 @@ var CricVoxParser = (function () {
   add({side:'round_the_wicket'}, 'round the wicket', 'around the wicket');
   add({bowler_type:'fast'}, 'seamer', 'pacer', 'fast bowler', 'quick bowler', 'pace bowler');
   add({bowler_type:'medium'}, 'medium pace', 'medium pacer');
+  add({bowler_type:'left_arm_fast'}, 'left arm fast', 'left arm pace', 'left arm quick', 'left arm seamer', 'left arm pacer', 'left arm seam');
+  add({bowler_type:'left_arm_medium'}, 'left arm medium', 'left arm medium pace', 'left arm medium pacer');
   add({bowler_type:'off_spin'}, 'off spin', 'off spinner', 'off break', 'offie');
   add({bowler_type:'leg_spin'}, 'leg spin', 'leg spinner', 'leg break', 'leggie');
   add({bowler_type:'left_arm_orthodox'}, 'left arm orthodox', 'left arm spin', 'left arm spinner');
@@ -327,10 +329,36 @@ var CricVoxParser = (function () {
 
   LEX.sort(function (a, b) { return b[0].length - a[0].length; });   // longest phrase first
 
-  function normalise(t) {
+  function clean(t) {
     return String(t || '').toLowerCase().replace(/[\u2019']/g, '').replace(/[^a-z0-9]+/g, ' ')
       .replace(/\b1st\b/g, 'first').replace(/\b2nd\b/g, 'second')
       .replace(/\b3rd\b/g, 'third').replace(/\b4th\b/g, 'fourth').trim();
+  }
+
+  // Speech-to-text mishearings -> cricket terms. raw_text keeps what was heard; only parsing uses these.
+  // The built-in list is a first guess: [VERIFY] with real recordings in M02.
+  var ALIAS = [
+    ['woodland','good length'], ['wood land','good length'], ['good land','good length'], ['good lens','good length'],
+    ['good lent','good length'], ['goodlength','good length'], ['could length','good length'], ['wood length','good length'],
+    ['yorka','yorker'], ['yoker','yorker'], ['yolker','yorker'], ['york a','yorker'],
+    ['full toes','full toss'], ['full tose','full toss'], ['fulltoss','full toss'],
+    ['bounce her','bouncer'], ['off stem','off stump'], ['of stump','off stump'], ['leg stem','leg stump'],
+    ['mid wicked','mid wicket'], ['midwicked','mid wicket'], ['mid ticket','mid wicket'],
+    ['mid of','mid off'], ['long of','long off'], ['fine lake','fine leg'], ['square lake','square leg'],
+    ['gali','gully'], ['gulley','gully'], ['golly','gully'], ['pooled','pulled'], ['pool shot','pull'],
+    ['for for','for four'], ['l b w','lbw'], ['elbw','lbw']
+  ];
+  var userAlias = [];
+  function setAliases(list) {
+    userAlias = (list || []).map(function (x) { return [clean(x[0]), clean(x[1])]; })
+      .filter(function (x) { return x[0] && x[1] && x[0] !== x[1]; });
+  }
+  function normalise(t) {
+    var s = ' ' + clean(t) + ' ';
+    userAlias.concat(ALIAS).sort(function (a, b) { return b[0].length - a[0].length; }).forEach(function (x) {
+      s = s.split(' ' + x[0] + ' ').join(' ' + x[1] + ' ');
+    });
+    return s.trim();
   }
 
   function scan(norm) {
@@ -401,7 +429,7 @@ var CricVoxParser = (function () {
     return out;
   }
 
-  return {parse: parse, normalise: normalise, version: VERSION};
+  return {parse: parse, normalise: normalise, setAliases: setAliases, builtinAliases: ALIAS, version: VERSION};
 })();
 /* ==========================  PARSER — END  ========================== */
 
@@ -485,6 +513,7 @@ function buildBall(fields, ctx, raw, seq, session) {
     confidence: 0,
     schema_version: SCHEMA_VERSION
   };
+  if (session.test) ball.session.test = true;
   CricVoxRules.apply(ball);
   ball.confidence = CricVoxRules.confidence(ball);
   return ball;
@@ -584,7 +613,7 @@ if (typeof document !== 'undefined') (function () {
     bowled:'Bowled', caught:'Caught', caught_behind:'Caught behind', lbw:'LBW', run_out:'Run out', stumped:'Stumped',
     hit_wicket:'Hit wicket', obstructing_the_field:'Obstructing', timed_out:'Timed out', retired:'Retired',
     right:'Right hand', left:'Left hand', over_the_wicket:'Over the wicket', round_the_wicket:'Round the wicket',
-    fast:'Fast', medium:'Medium', off_spin:'Off spin', leg_spin:'Leg spin', left_arm_orthodox:'Left-arm orthodox',
+    fast:'Right-arm fast', medium:'Right-arm medium', left_arm_fast:'Left-arm fast', left_arm_medium:'Left-arm medium', off_spin:'Off spin', leg_spin:'Leg spin', left_arm_orthodox:'Left-arm orthodox',
     left_arm_wrist_spin:'Left-arm wrist spin', up:'Keeper up', back:'Keeper back',
     open:'Open net', closed:'Closed net', off_open:'Off side open', leg_open:'Leg side open', back_blocked:'Only back blocked'
   };
@@ -773,6 +802,7 @@ if (typeof document !== 'undefined') (function () {
       [['en-GB','English (UK)'],['en-IN','English (India)'],['en-AU','English (Australia)'],['en-US','English (US)']].map(function (o) {
         return '<option value="' + o[0] + '"' + (d.lang === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select>' +
       '<button class="primary" data-act="start">Start session</button>' +
+      '<button class="ghost" style="width:100%;margin-top:10px" data-act="testopen">Start a test session with random balls</button>' +
       '<p class="note">No audio is stored. Only the recognised text is kept, on this phone.</p></div>';
     h += '<div style="text-align:center;margin-top:8px"><button class="linkbtn" data-act="tests">Run the 15 parser tests</button></div></div>';
     return h;
@@ -793,14 +823,12 @@ if (typeof document !== 'undefined') (function () {
     if (o.runs == null) return x || '?';
     return (o.runs === 0 && !x ? '•' : o.runs) + x;
   }
-  function micSVG() {
-    return '<svg viewBox="0 0 92 92" aria-hidden="true"><circle cx="46" cy="46" r="44" fill="#b8321f"/>' +
-      '<circle cx="46" cy="46" r="44" fill="none" stroke="#7e1f12" stroke-width="2"/>' +
-      '<path d="M22 9 Q36 46 22 83" fill="none" stroke="#f3e6d3" stroke-width="1.6" stroke-dasharray="3 3.5" opacity=".85"/>' +
-      '<path d="M70 9 Q56 46 70 83" fill="none" stroke="#f3e6d3" stroke-width="1.6" stroke-dasharray="3 3.5" opacity=".85"/>' +
-      '<rect x="39" y="24" width="14" height="27" rx="7" fill="#fff"/>' +
-      '<path d="M32 44a14 14 0 0 0 28 0" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/>' +
-      '<path d="M46 58v8M38 67h16" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/></svg>';
+  function micSVG(on) {
+    if (on) return '<svg viewBox="0 0 92 92" aria-hidden="true"><circle cx="46" cy="46" r="44" fill="#c8402f"/><rect x="31" y="31" width="30" height="30" rx="5" fill="#fff"/></svg>';
+    return '<svg viewBox="0 0 92 92" aria-hidden="true"><circle cx="46" cy="46" r="44" fill="var(--accent)"/>' +
+      '<rect x="38" y="21" width="16" height="30" rx="8" fill="var(--accent-ink)"/>' +
+      '<path d="M30 44a16 16 0 0 0 32 0" fill="none" stroke="var(--accent-ink)" stroke-width="3.6" stroke-linecap="round"/>' +
+      '<path d="M46 60v9M37 70h18" stroke="var(--accent-ink)" stroke-width="3.6" stroke-linecap="round"/></svg>';
   }
   function viewCapture() {
     var ctx = S.session.ctx, cl = ctxLine(ctx), b = selBall(), last = S.balls.length ? S.balls[S.balls.length - 1] : null;
@@ -812,15 +840,15 @@ if (typeof document !== 'undefined') (function () {
     h += '<div class="charts"><div class="chart"><h3>Wagon wheel</h3>' + wagonSVG(mine, ctx.batter.hand, {mini: true, hi: last && mine.indexOf(last) !== -1 ? last : null}) + '</div>' +
          '<div class="chart"><h3>Pitch map</h3>' + pitchSVG(mine, ctx.batter.hand, {mini: true, hi: last && mine.indexOf(last) !== -1 ? last : null}) + '</div></div>';
     if (S.listening) {
-      h += '<div class="confirm live"><div class="head"><b>Listening</b></div><div class="raw" id="live">' + esc(S.live || 'Say the ball, then tap the ball button again.') + '</div></div>';
+      h += '<div class="confirm live"><div class="head"><b>Listening</b></div><div class="raw" id="live">' + esc(S.live || 'Describe the ball. Pauses are fine. Tap the red square when you are done.') + '</div></div>';
     } else if (b) {
       var miss = CricVoxRules.missing(b), iss = S.issues[b.ball_id] || [];
       h += '<div class="confirm"><div class="head"><b>Ball ' + b.seq + '</b><span>' + esc(b.batter.name || 'Batter') + (miss.length ? ', ' + miss.length + ' to fill' : ', complete') + '</span></div>' +
-        '<div class="raw">“' + esc(b.raw_text) + '”</div><div class="chips">' +
+        '<div class="raw">“' + esc(b.raw_text) + '” <button class="linkbtn" style="min-height:0;padding:2px 0;font-style:normal;font-size:13px" data-act="fixes">Fix a misheard word</button></div><div class="chips">' +
         '<button class="chip" data-act="ballbowler"><small>Bowler</small>' + esc(b.bowler.name || 'Bowler') + '</button>' + CHIP_ORDER.map(function (k) { return chip(b, k, miss); }).join('') + '</div>' +
         (iss.length ? '<div class="issues">' + iss.map(esc).join('<br>') + '</div>' : '') + '</div>';
     } else {
-      h += '<div class="confirm"><div class="empty">No balls yet. Tap the ball button and say a delivery, for example: “Short ball outside off, cut to backward point for four.”</div></div>';
+      h += '<div class="confirm"><div class="empty">No balls yet. Tap the mic and say a delivery, for example: “Short ball outside off, cut to backward point for four.”</div></div>';
     }
     h += '<div class="last"><span class="lbl">Last 6</span>';
     var six = S.balls.slice(-6);
@@ -832,8 +860,8 @@ if (typeof document !== 'undefined') (function () {
     h += '</div></div>';
     h += '<div class="dock"><div class="in"><div class="typebox"><input id="typed" type="text" placeholder="Type instead of speak" autocomplete="off" autocapitalize="off" enterkeyhint="done">' +
          '<button data-act="typed">Add</button></div><div class="act"><button class="ghost" data-act="undo"' + (S.balls.length ? '' : ' disabled style="opacity:.4"') + '>Undo</button>' +
-         '<button class="mic ' + (S.listening ? 'on ' : '') + (SR ? '' : 'na') + '" data-act="mic" aria-label="' + (S.listening ? 'Stop listening' : 'Speak a ball') + '">' + micSVG() + '</button>' +
-         '<button class="ghost" data-act="summary">Summary</button></div><div class="hint" id="hint">' + esc(S.micMsg || (SR ? (S.listening ? 'Tap again when done' : 'Tap the ball, say the delivery') : 'Voice is not available in this browser. Type, or use your keyboard’s mic key.')) + '</div></div></div>';
+         '<button class="mic ' + (S.listening ? 'on ' : '') + (SR ? '' : 'na') + '" data-act="mic" aria-label="' + (S.listening ? 'Stop and read the ball' : 'Record a ball') + '">' + micSVG(S.listening) + '</button>' +
+         '<button class="ghost" data-act="summary">Summary</button></div><div class="hint" id="hint">' + esc(S.micMsg || (SR ? (S.listening ? 'Tap the red square when you are done' : 'Tap the mic, describe the ball, tap stop') : 'Voice is not available in this browser. Type, or use your keyboard’s mic key.')) + '</div></div></div>';
     return h;
   }
   function stats(balls) {
@@ -863,6 +891,7 @@ if (typeof document !== 'undefined') (function () {
     h += '<h1 style="font-size:24px;letter-spacing:-.02em">' + esc(S.session.name || 'Net session') + '</h1><p class="note" style="margin-top:2px">' + new Date(S.session.started_at).toLocaleString() + (S.session.net ? ', ' + lab(S.session.net).toLowerCase() : '') + '</p>';
     if (names.length > 1) h += '<div class="filters" style="margin-top:10px"><button data-act="filter" data-val="*" class="' + (S.filter === '*' ? 'on' : '') + '">All batters</button>' +
       names.map(function (n) { return '<button data-act="filter" data-val="' + esc(n) + '" class="' + (S.filter === n ? 'on' : '') + '">' + esc(n) + '</button>'; }).join('') + '</div>';
+    if (S.session.test) h += '<p class="issues" style="font-size:14px">Test data: randomly generated balls, not observations.</p>';
     if (!S.balls.length) h += '<div class="card"><p class="empty">No balls recorded yet. Go back and capture some.</p></div>';
     h += '<div class="card"><h2>Counts</h2><div class="tiles">' +
       [['Balls',st.balls],['Runs (est.)',st.runs],['Dots',st.dots],['Fours',st.fours],['Sixes',st.sixes],['Wickets',st.wickets],['Extras',st.extras],['To fill',st.gaps]].map(function (t) {
@@ -875,10 +904,11 @@ if (typeof document !== 'undefined') (function () {
     var shots = Object.keys(st.shots).sort(function (a, b) { return st.shots[b] - st.shots[a]; }), mx = shots.length ? st.shots[shots[0]] : 1;
     if (shots.length) h += '<div class="card"><h2>Shots</h2><div class="bars">' + shots.map(function (k) {
       return '<div><span>' + lab(k) + '</span><span><i style="width:' + Math.max(6, Math.round(100 * st.shots[k] / mx)) + '%"></i></span><em>' + st.shots[k] + '</em></div>'; }).join('') + '</div></div>';
-    h += '<div class="card"><h2>Export</h2><div class="row"><button class="ghost" data-act="savefile">Save JSON file</button><button class="ghost" data-act="copy">Copy JSON</button></div>' +
+    h += '<div class="card"><h2>Export</h2><div class="row"><button class="ghost" data-act="savefile">Save JSON</button><button class="ghost" data-act="savecsv">Save CSV</button><button class="ghost" data-act="copy">Copy JSON</button></div>' +
+      '<p class="note">JSON: every ball plus summary metrics for the session, each batter and each bowler (counts by length, line, zone, shot, sector, trajectory, wickets, fill rates). CSV: one row per ball for a spreadsheet.</p>' +
       '<label class="f" for="json">Session JSON</label><textarea id="json" readonly>' + esc(exportJSON()) + '</textarea></div>';
     h += '<div class="row" style="margin-top:14px"><button class="ghost" data-act="discard">' + (S.discardArmed ? 'Tap again to end and clear' : 'End session') + '</button></div>';
-    h += '<p class="foot"><b>Human-coded data.</b> Spoken by an observer, recorded in zones. Not measured.</p></div>';
+    h += '<p class="foot"><b>Human-coded data.</b> ' + (S.session.test ? 'This session is generated test data.' : 'Spoken by an observer, recorded in zones. Not measured.') + '</p></div>';
     return h;
   }
   function viewTests() {
@@ -929,7 +959,7 @@ if (typeof document !== 'undefined') (function () {
 
   /* ---------- actions ---------- */
   function recheck(b) { S.issues[b.ball_id] = CricVoxRules.apply(b); }
-  function handleText(raw) {
+  function handleText(raw, quiet) {
     raw = String(raw || '').trim(); if (!raw) return;
     var r = CricVoxParser.parse(raw), ctx = S.session.ctx, b;
     if (r.kind === 'empty') return;
@@ -953,6 +983,7 @@ if (typeof document !== 'undefined') (function () {
     if (!ctx.log) ctx.log = [];
     if (ctx.over != null) { ctx.over = null; ctx.log.push('o'); }      // out-of-turn ball: order resumes where it was
     else { ctx.bi = (ctx.bi + 1) % ctx.bowlers.length; ctx.log.push('q'); }
+    if (quiet) return;
     save(); render();
     if (!Object.keys(r.fields).length) toast('Saved, but nothing was recognised. Tap the chips or Undo.');
   }
@@ -963,93 +994,225 @@ if (typeof document !== 'undefined') (function () {
     c.over = null;
     save(); render(); toast('Ball ' + b.seq + ' removed');
   }
-  var rec = null, micEnd = null;
+  /* Recording runs until the user taps stop. Chrome ends a recognition segment after a short pause,
+     so segments are chained and their text is joined. Parsing happens only after stop. */
+  var mic = null;
   function hint(t) { S.micMsg = t; var el = document.getElementById('hint'); if (el) el.textContent = t; }
   function toggleMic() {
     if (!SR) { toast('Voice is not available here. Use the type box.'); return; }
-    if (S.listening) {                                   // second tap always stops, even if the engine hangs
-      var r0 = rec, end0 = micEnd;
-      try { if (r0) r0.stop(); } catch (e) {}
-      hint('Stopping');
-      setTimeout(function () { try { if (r0) r0.abort(); } catch (e) {} if (end0) end0(); }, 900);
-      return;
-    }
-    // First use: ask Chrome for the microphone ourselves, so the permission prompt appears on the first tap.
+    if (mic) { stopMic(); return; }
     var md = navigator.mediaDevices;
-    if (S.micOK || !md || !md.getUserMedia) { startRec(); return; }
+    if (S.micOK || !md || !md.getUserMedia) { startMic(); return; }
     hint('Asking for the microphone');
     md.getUserMedia({audio: true}).then(function (stream) {
       stream.getTracks().forEach(function (t) { t.stop(); });
-      S.micOK = true; setTimeout(startRec, 200);
+      S.micOK = true; setTimeout(startMic, 200);
     }, function (e) {
       var n = e && e.name;
       if (n === 'NotAllowedError' || n === 'SecurityError') S.micMsg = 'The microphone is blocked for this page. If no permission prompt appeared, this page view cannot ask for it: open your own hosted copy. Until then, type or use your keyboard’s mic key.';
       else if (n === 'NotFoundError') S.micMsg = 'No microphone found on this device.';
-      else { startRec(); return; }
+      else { startMic(); return; }
       render();
     });
   }
-  function startRec() {
-    if (S.listening) return;
-    var m = {fin: '', last: '', err: '', done: false, heard: false, t1: null, t2: null};
+  function startMic() {
+    if (mic) return;
+    mic = {text: '', seg: '', err: '', stopping: false, done: false, fast: 0, t0: Date.now(), r: null, tStop: null};
+    S.listening = true; S.live = ''; S.micMsg = 'Starting the mic'; render();
+    segment(mic);
+  }
+  function stopMic() {
+    var m = mic; if (!m) return;
+    if (m.stopping) { finishMic(m); return; }             // a further tap forces the end
+    m.stopping = true; hint('Reading the ball');
+    try { m.r.stop(); } catch (e) {}
+    m.tStop = setTimeout(function () { try { m.r.abort(); } catch (e) {} finishMic(m); }, 1500);
+  }
+  function segment(m) {
     var r;
     try {
       r = new SR(); r.lang = S.session.lang || 'en-GB'; r.interimResults = true; r.continuous = false; r.maxAlternatives = 1;
-    } catch (e) { toast('Voice could not start. Use the type box.'); return; }
-    function end() {
-      if (m.done) return; m.done = true;
-      clearTimeout(m.t1); clearTimeout(m.t2);
-      r.onresult = r.onerror = r.onend = r.onaudiostart = r.onspeechstart = null;
-      if (rec === r) { rec = null; micEnd = null; }
-      S.listening = false; S.live = null;
-      var text = (m.fin.trim() || m.last).trim();
-      S.micMsg = '';
-      if (!text) {
-        if (m.err === 'not-allowed' || m.err === 'service-not-allowed') S.micMsg = 'Microphone is blocked here. Type, or use your keyboard’s mic key.';
-        else if (m.err === 'network') S.micMsg = 'Speech needs a connection on this phone. Type, or use your keyboard’s mic key.';
-        else if (m.err === 'no-audio') S.micMsg = 'Mic opened but no speech arrived (' + (m.heard ? 'sound heard' : 'no sound') + '). Type, or use your keyboard’s mic key.';
-        else if (m.err === 'no-speech') S.micMsg = 'Nothing heard. Tap the ball and try again.';
-        else if (m.err) S.micMsg = 'Voice stopped (' + m.err + '). Type instead.';
-        else S.micMsg = 'No words came back. Type, or use your keyboard’s mic key.';
-        render(); return;
-      }
-      render(); handleText(text);
-    }
-    function quiet(ms) {                                 // stop by itself when no words arrive
-      clearTimeout(m.t1);
-      m.t1 = setTimeout(function () { if (!m.fin && !m.last) m.err = m.err || 'no-audio'; try { r.stop(); } catch (e) {} m.t2 = setTimeout(function () { try { r.abort(); } catch (e) {} end(); }, 900); }, ms);
-    }
-    r.onaudiostart = function () { hint('Mic open. Say the delivery.'); };
-    r.onspeechstart = function () { m.heard = true; hint('Hearing you. Tap again when done.'); };
+    } catch (e) { m.err = 'start'; finishMic(m); return; }
+    m.r = r; m.seg = ''; m.segStart = Date.now();
+    r.onaudiostart = function () { if (mic === m && !m.stopping) hint('Recording. Tap the red square when you are done.'); };
     r.onresult = function (e) {
-      var interim = '';
-      for (var i = e.resultIndex; i < e.results.length; i++) {
-        if (e.results[i].isFinal) m.fin += e.results[i][0].transcript + ' '; else interim += e.results[i][0].transcript;
+      var fin = '', interim = '';
+      for (var i = 0; i < e.results.length; i++) {
+        if (e.results[i].isFinal) fin += e.results[i][0].transcript + ' '; else interim += e.results[i][0].transcript;
       }
-      m.last = (m.fin + interim).trim(); S.live = m.last;
-      var el = document.getElementById('live'); if (el) el.textContent = m.last;
-      quiet(4000);
+      m.seg = (fin + interim).trim(); S.live = (m.text + ' ' + m.seg).trim();
+      var el = document.getElementById('live'); if (el) el.textContent = S.live;
     };
     r.onerror = function (e) { m.err = e.error || 'error'; };
-    r.onend = end;
-    try { r.start(); } catch (e) { toast('Voice could not start. Use the type box.'); return; }
-    rec = r; micEnd = end; S.listening = true; S.live = ''; S.micMsg = 'Starting the mic'; render(); quiet(9000);
+    r.onend = function () {
+      if (mic !== m || m.r !== r || m.done) return;
+      if (m.seg) m.text = (m.text + ' ' + m.seg).trim();
+      m.seg = '';
+      var fatal = ['not-allowed', 'service-not-allowed', 'network', 'audio-capture', 'language-not-supported'].indexOf(m.err) !== -1;
+      if (m.stopping || fatal) { finishMic(m); return; }
+      m.fast = (Date.now() - m.segStart < 250) ? m.fast + 1 : 0;
+      if (m.fast > 4 || Date.now() - m.t0 > 90000) { m.err = m.err || 'timeout'; finishMic(m); return; }
+      m.err = ''; segment(m);                              // pause in speech: keep recording
+    };
+    try { r.start(); } catch (e) { m.err = 'start'; finishMic(m); }
+  }
+  function finishMic(m) {
+    if (m.done) return; m.done = true;
+    clearTimeout(m.tStop);
+    if (m.r) m.r.onresult = m.r.onerror = m.r.onend = m.r.onaudiostart = null;
+    if (mic === m) mic = null;
+    S.listening = false; S.live = null;
+    var text = (m.text + ' ' + m.seg).trim();
+    S.micMsg = '';
+    if (!text) {
+      if (m.err === 'not-allowed' || m.err === 'service-not-allowed') S.micMsg = 'Microphone is blocked here. Type, or use your keyboard’s mic key.';
+      else if (m.err === 'network') S.micMsg = 'Speech needs a connection on this phone. Type, or use your keyboard’s mic key.';
+      else if (m.err && m.err !== 'no-speech' && m.err !== 'aborted') S.micMsg = 'Voice stopped (' + m.err + '). Type instead.';
+      else S.micMsg = 'No words were heard. Tap the mic and try again.';
+      render(); return;
+    }
+    render(); handleText(text);
+  }
+  function tally(balls, fn) {
+    var o = {}; balls.forEach(function (b) { var k = fn(b); if (k !== null && k !== undefined && k !== '') o[k] = (o[k] || 0) + 1; }); return o;
+  }
+  function share(n, d) { return d ? Math.round(1000 * n / d) / 1000 : null; }
+  function metrics(balls) {
+    var st = stats(balls), n = balls.length, sec = {};
+    function have(fn) { return balls.filter(fn).length; }
+    balls.forEach(function (b) {
+      var k = b.wagon.sector; if (!k) return;
+      sec[k] = sec[k] || {inner: 0, deep: 0, unknown: 0, total: 0}; sec[k][b.wagon.depth || 'unknown']++; sec[k].total++;
+    });
+    var withLine = have(function (b) { return b.pitch.line; }), withLen = have(function (b) { return b.pitch.length; });
+    return {
+      balls: n, runs_estimated: st.runs, balls_with_runs: have(function (b) { return b.outcome.runs != null; }),
+      dots: st.dots, fours: st.fours, sixes: st.sixes, wickets: st.wickets, extras: st.extras, balls_with_empty_fields: st.gaps,
+      fill_rate: {length: share(withLen, n), line: share(withLine, n), shot: share(have(function (b) { return b.shot; }), n),
+        sector: share(have(function (b) { return b.wagon.sector; }), n), runs: share(have(function (b) { return b.outcome.runs != null; }), n)},
+      share_on_stumps: share(have(function (b) { return ['off_stump','middle','leg_stump'].indexOf(b.pitch.line) !== -1; }), withLine),
+      share_good_length: share(have(function (b) { return b.pitch.length === 'good'; }), withLen),
+      by_length: tally(balls, function (b) { return b.pitch.length; }), by_line: tally(balls, function (b) { return b.pitch.line; }),
+      by_zone: tally(balls, function (b) { return b.pitch.zone; }), by_shot: tally(balls, function (b) { return b.shot; }),
+      by_sector: sec, by_region: tally(balls, function (b) { return b.wagon.region; }),
+      by_trajectory: tally(balls, function (b) { return b.trajectory; }), by_wicket: tally(balls, function (b) { return b.outcome.wicket; }),
+      by_extras: tally(balls, function (b) { return b.outcome.extras; }), by_bowler_type: tally(balls, function (b) { return b.bowler.type; })
+    };
+  }
+  function summaryMetrics() {
+    function by(fn) {
+      var g = {}, o = {};
+      S.balls.forEach(function (b) { var k = fn(b) || 'unnamed'; (g[k] = g[k] || []).push(b); });
+      Object.keys(g).forEach(function (k) { o[k] = metrics(g[k]); });
+      return o;
+    }
+    return {session: metrics(S.balls), by_batter: by(function (b) { return b.batter.name; }), by_bowler: by(function (b) { return b.bowler.name; })};
   }
   function exportJSON() {
-    return JSON.stringify({app: 'CricVox', schema_version: SCHEMA_VERSION, exported_at: new Date().toISOString(), note: 'Human-coded data',
+    return JSON.stringify({app: 'CricVox', schema_version: SCHEMA_VERSION, exported_at: new Date().toISOString(),
+      note: S.session.test ? 'TEST DATA: randomly generated balls, not observations' : 'Human-coded data',
       runs_note: 'Runs are observer estimates',
-      session: {id: S.session.id, type: 'training', net: S.session.net || null, name: S.session.name || null, started_at: S.session.started_at,
-        bowlers: S.session.ctx.bowlers}, balls: S.balls}, null, 2);
+      session: {id: S.session.id, type: 'training', test: !!S.session.test, net: S.session.net || null, name: S.session.name || null,
+        started_at: S.session.started_at, bowlers: S.session.ctx.bowlers},
+      summary: summaryMetrics(), balls: S.balls}, null, 2);
   }
-  function fileName() {
+  function exportCSV() {
+    var cols = ['seq','ball_id','test','batter','hand','bowler','bowler_type','side','keeper_position','net','length','line','zone','shot',
+      'sector','depth','region','trajectory','runs','boundary','extras','wicket','confidence','raw_text'];
+    function cell(v) { v = v == null ? '' : String(v); return /[",\r\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+    var rows = [cols.join(',')];
+    S.balls.forEach(function (b) {
+      var r = {seq: b.seq, ball_id: b.ball_id, test: b.session.test ? 1 : 0, batter: b.batter.name, hand: b.batter.hand, bowler: b.bowler.name,
+        bowler_type: b.bowler.type, side: b.bowler.side, keeper_position: b.keeper_position, net: b.session.net, length: b.pitch.length,
+        line: b.pitch.line, zone: b.pitch.zone, shot: b.shot, sector: b.wagon.sector, depth: b.wagon.depth, region: b.wagon.region,
+        trajectory: b.trajectory, runs: b.outcome.runs, boundary: b.outcome.boundary, extras: b.outcome.extras, wicket: b.outcome.wicket,
+        confidence: b.confidence, raw_text: b.raw_text};
+      rows.push(cols.map(function (c) { return cell(r[c]); }).join(','));
+    });
+    return rows.join('\r\n');
+  }
+
+  /* ---------- test mode: random balls, written as spoken phrases and sent through the real parser ---------- */
+  function pick(list) {
+    var t = 0, i, x; for (i = 0; i < list.length; i++) t += list[i][1];
+    x = Math.random() * t;
+    for (i = 0; i < list.length; i++) { x -= list[i][1]; if (x < 0) return list[i][0]; }
+    return list[list.length - 1][0];
+  }
+  function one(a) { return a[Math.floor(Math.random() * a.length)]; }
+  var GEN = {
+    length: [['full toss',3],['yorker',6],['full',22],['good length',34],['back of a length',18],['short',17]],
+    line: [['wide outside off',5],['outside off',30],['on off stump',22],['on middle',16],['on leg stump',12],['down leg',11],['wide down leg',4]],
+    say: {drive:'driven', cut:'cut', pull:'pulled', hook:'hooked', sweep:'swept', glance:'glanced', flick:'flicked', defence:'defended',
+      leave:'left alone', edge:'edged', slog:'slogged'},
+    shots: {'full toss':['drive','slog','flick','pull'], 'yorker':['defence','flick','drive'], 'full':['drive','drive','flick','slog','sweep','defence'],
+      'good length':['defence','defence','leave','drive','flick','edge','sweep'], 'back of a length':['cut','defence','pull','glance','leave','edge'],
+      'short':['pull','pull','cut','hook','leave','defence']},
+    regions: {drive:['cover','extra cover','mid off','mid on','long off','long on'], cut:['point','backward point','third man','deep point'],
+      pull:['mid wicket','square leg','deep square leg','deep mid wicket'], hook:['fine leg','deep square leg'],
+      sweep:['square leg','fine leg','deep square leg'], glance:['fine leg','square leg'], flick:['mid wicket','square leg','mid on'],
+      edge:['slip','gully','third man','fine leg'], slog:['cow corner','long on','deep mid wicket']}
+  };
+  function randomBall(gaps) {
+    var g = gaps === 'some' ? 0.15 : 0, len = pick(GEN.length), parts = [], roll = Math.random();
+    if (Math.random() >= g) parts.push(len);
+    if (Math.random() >= g) parts.push(pick(GEN.line));
+    if (roll < 0.03) { parts.push(one(['bowled', 'lbw'])); return parts.join(', '); }
+    if (roll < 0.05) { parts.push('edged, caught behind'); return parts.join(', '); }
+    var key = one(GEN.shots[len]), txt = GEN.say[key];
+    if (key === 'leave' || key === 'defence') { parts.push(txt); if (key === 'defence' && Math.random() < 0.5) parts.push('no run'); return parts.join(', '); }
+    if (Math.random() >= g) txt += ' to ' + one(GEN.regions[key]);
+    if (key === 'edge' && Math.random() < 0.25) { parts.push(txt + ', caught'); return parts.join(', '); }
+    var air = (key === 'slog' || key === 'hook') ? 0.6 : (key === 'pull' || key === 'drive' || key === 'sweep') ? 0.2 : 0.05, lofted = Math.random() < air;
+    if (lofted) txt += ' in the air'; else if (Math.random() < 0.3) txt += ' along the ground';
+    var runs = lofted ? pick([['',25],['for one',15],['for two',15],['for four',20],['for six',25]])
+                      : pick([['',35],['no run',15],['for one',20],['for two',12],['for three',3],['for four',15]]);
+    if (runs) txt += ' ' + runs;
+    parts.push(txt); return parts.join(', ');
+  }
+
+  /* ---------- word fixes (the user's own mishearing list) ---------- */
+  var FIXKEY = 'cricvox.fixes';
+  function loadFixes() { try { var f = JSON.parse(localStorage.getItem(FIXKEY) || '[]'); return Array.isArray(f) ? f : []; } catch (e) { return []; } }
+  function saveFixes(f) { try { localStorage.setItem(FIXKEY, JSON.stringify(f)); } catch (e) {} CricVoxParser.setAliases(f); }
+  CricVoxParser.setAliases(loadFixes());
+  function drawFixSheet() {
+    var f = loadFixes();
+    S.sheet = {type: 'fixes'};
+    $sheet.innerHTML = '<div class="panel"><h2>Fix a misheard word</h2>' +
+      '<label class="f" for="fxh">The phone wrote</label><input id="fxh" type="text" placeholder="woodland" autocomplete="off" autocapitalize="off">' +
+      '<label class="f" for="fxm">It should be</label><input id="fxm" type="text" placeholder="good length" autocomplete="off" autocapitalize="off">' +
+      '<button class="primary" data-act="fixadd">Add and re-read this ball</button>' +
+      (f.length ? '<label class="f">Your fixes</label>' + f.map(function (x, i) {
+        return '<div class="bwh" style="margin:6px 0 0"><div style="flex:1">' + esc(x[0]) + ' → <b>' + esc(x[1]) + '</b></div><button class="x" data-act="fixdel" data-i="' + i + '" aria-label="Remove fix">✕</button></div>'; }).join('') : '') +
+      '<p class="note">' + CricVoxParser.builtinAliases.length + ' common mishearings are built in, for example “woodland” for “good length”. The saved text of a ball stays as it was heard.</p></div>';
+    $sheet.className = 'open';
+  }
+  function reread(b) {                                    // fill only the fields that are still empty
+    var r = CricVoxParser.parse(b.raw_text), f = flatten(b);
+    if (r.kind !== 'ball') return;
+    Object.keys(r.fields).forEach(function (k) { if (f[k] === null || f[k] === undefined) setFlat(b, k, r.fields[k]); });
+    recheck(b);
+  }
+  function drawTestSheet() {
+    var o = S.sheet;
+    $sheet.innerHTML = '<div class="panel"><h2>Test session</h2><p class="note" style="margin:0 0 6px">Random balls for the batter, bowlers and net type from setup. They go through the real parser and are marked as test data.</p>' +
+      '<label class="f">Number of balls</label><div class="seg">' + [12, 30, 60, 120].map(function (n) {
+        return '<button data-act="testopt" data-k="n" data-val="' + n + '" class="' + (o.n === n ? 'on' : '') + '">' + n + '</button>'; }).join('') + '</div>' +
+      '<label class="f">Completeness</label><div class="seg">' + [['none', 'Every field spoken'], ['some', 'Some gaps']].map(function (x) {
+        return '<button data-act="testopt" data-k="gaps" data-val="' + x[0] + '" class="' + (o.gaps === x[0] ? 'on' : '') + '">' + x[1] + '</button>'; }).join('') + '</div>' +
+      '<button class="primary" data-act="testgo">Generate</button></div>';
+    $sheet.className = 'open';
+  }
+  function fileName(ext) {
     var d = new Date(), p = function (n) { return (n < 10 ? '0' : '') + n; };
-    return 'cricvox-session-' + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' + p(d.getHours()) + p(d.getMinutes()) + '.json';
+    return 'cricvox-session-' + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' + p(d.getHours()) + p(d.getMinutes()) + '.' + ext;
   }
-  function saveFile() {
-    var data = exportJSON(), name = fileName();
+  function saveFile(kind) {
+    var csv = kind === 'csv', data = csv ? exportCSV() : exportJSON(), name = fileName(csv ? 'csv' : 'json');
     function plain() {
       try {
-        var url = URL.createObjectURL(new Blob([data], {type: 'application/json'})), a = document.createElement('a');
+        var url = URL.createObjectURL(new Blob([data], {type: csv ? 'text/csv' : 'application/json'})), a = document.createElement('a');
         a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
         setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
         toast('If no file appears, use Copy JSON.');
@@ -1059,7 +1222,7 @@ if (typeof document !== 'undefined') (function () {
     var timeout = new Promise(function (res) { setTimeout(function () { res(null); }, 2500); });
     Promise.race([downloadsP, timeout]).then(function (dl) {
       if (!dl) { plain(); return; }
-      dl.save({filename: name, data: data}).then(function () { toast('JSON file saved'); }, function (e) {
+      dl.save({filename: name, data: data}).then(function () { toast('File saved'); }, function (e) {
         toast(e && e.code === 'declined' ? 'Save cancelled' : 'Could not save a file here. Use Copy JSON.');
       });
     }, plain);
@@ -1073,6 +1236,12 @@ if (typeof document !== 'undefined') (function () {
     if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(data).then(function () { toast('JSON copied'); }, old); else old();
   }
 
+  function newSession(test) {
+    var d = S.draft;
+    S.session = {id: uid(), type: 'training', test: !!test, net: d.net, name: d.name.trim() || (test ? 'Test session' : ''), started_at: new Date().toISOString(),
+      lang: d.lang, ctx: JSON.parse(JSON.stringify(d.ctx))};
+    S.balls = []; S.sel = null; S.issues = {}; S.filter = '*';
+  }
   function formCtx() { return S.sheet && S.sheet.type === 'ctx' ? S.sheet.ctx : S.draft.ctx; }
   var ACT = {
     seg: function (el) {
@@ -1093,11 +1262,23 @@ if (typeof document !== 'undefined') (function () {
       b.bowler = {name: x.name || null, type: x.type || null, side: x.side || null};
       closeSheet(); save(); render();
     },
-    start: function () {
-      var d = S.draft;
-      S.session = {id: uid(), type: 'training', net: d.net, name: d.name.trim(), started_at: new Date().toISOString(), lang: d.lang, ctx: JSON.parse(JSON.stringify(d.ctx))};
-      S.balls = []; S.sel = null; S.issues = {}; S.filter = '*'; S.screen = 'capture'; S.draft = null; save(); render(); window.scrollTo(0, 0);
+    start: function () { newSession(false); S.screen = 'capture'; S.draft = null; save(); render(); window.scrollTo(0, 0); },
+    testopen: function () { S.sheet = {type: 'test', n: 30, gaps: 'some'}; drawTestSheet(); },
+    testopt: function (el) { S.sheet[el.dataset.k] = el.dataset.k === 'n' ? Number(el.dataset.val) : el.dataset.val; drawTestSheet(); },
+    testgo: function () {
+      var o = S.sheet; closeSheet(); newSession(true);
+      for (var i = 0; i < o.n; i++) handleText(randomBall(o.gaps), true);
+      S.sel = null; S.screen = 'summary'; S.draft = null; save(); render(); window.scrollTo(0, 0);
     },
+    fixes: drawFixSheet,
+    fixadd: function () {
+      var a = document.getElementById('fxh').value.trim(), b = document.getElementById('fxm').value.trim(), f = loadFixes(), ball = selBall();
+      if (!a || !b) { toast('Fill in both boxes.'); return; }
+      f.push([a, b]); saveFixes(f);
+      if (ball) reread(ball);
+      closeSheet(); save(); render(); toast('Fix saved');
+    },
+    fixdel: function (el) { var f = loadFixes(); f.splice(Number(el.dataset.i), 1); saveFixes(f); drawFixSheet(); },
     resume: function () {
       var d = load(); if (!d) return;
       S.session = d.session; S.balls = d.balls; S.sel = null; S.screen = 'capture'; render();
@@ -1121,7 +1302,8 @@ if (typeof document !== 'undefined') (function () {
     undo: undo,
     mic: toggleMic,
     typed: function () { var i = document.getElementById('typed'), v = i.value; i.value = ''; handleText(v); },
-    savefile: saveFile,
+    savefile: function () { saveFile('json'); },
+    savecsv: function () { saveFile('csv'); },
     copy: copyJSON,
     discard: function () {
       if (!S.discardArmed) { S.discardArmed = true; render(); return; }
